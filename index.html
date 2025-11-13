@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>就活ダッシュボード PWA</title>
+
+  <!-- PWA 関連 -->
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    ::-webkit-scrollbar{height:8px;width:8px}
+    ::-webkit-scrollbar-thumb{background:#c7d2fe;border-radius:8px}
+  </style>
+</head>
+<body class="min-h-screen bg-[#f4f7ff] text-slate-900">
+  <div id="root"></div>
+
+  <!-- React & ReactDOM & Babel (JSX用) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- アプリ本体 -->
+  <script type="text/babel" src="app.js"></script>
+
+  <!-- Service Worker 登録 -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js')
+          .catch(err => console.log('SW registration failed', err));
+      });
+    }
+  </script>
+</body>
+</html>
