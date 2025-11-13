@@ -1,11 +1,11 @@
 const { useState, useEffect, useMemo } = React;
 
-// -------------------- ユーティリティ --------------------
-const LS_KEY = "jobhunt-dashboard-pwa-v1";
-const uid = () => Math.random().toString(36).slice(2,10);
+// -------------------- 定数 & ユーティリティ --------------------
+const CACHE_KEY = "jobhunt-dashboard-cache-v4";
+const uid = () => Math.random().toString(36).slice(2, 10);
 const ymToday = () => {
-  const d=new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 const cx = (...xs) => xs.filter(Boolean).join(" ");
 
@@ -21,156 +21,325 @@ const DEFAULT_QUOTES = [
 ];
 
 const DEFAULT_INDUSTRIES = [
-  "総合商社","コンサル","金融","メーカー","通信・IT","運輸・航空","官公庁・公社","メディア・エンタメ","スタートアップ"
+  "総合商社",
+  "コンサル",
+  "金融",
+  "メーカー",
+  "通信・IT",
+  "運輸・航空",
+  "官公庁・公社",
+  "メディア・エンタメ",
+  "スタートアップ",
 ];
 
 const migrate = (raw) => {
   const base = raw || {};
   base.strategy = base.strategy || {};
-  // 戦略：ビジョン / 重点方針 / ルーティーン
-  base.strategy.vision  = base.strategy.vision  || "社会にインパクトを与えるキャリアを築く。使命感・戦略性・チーム連携を重視。";
-  base.strategy.focus   = base.strategy.focus   || base.strategy.policies || "① 情報収集 → ② 志望度上位に集中 → ③ 想定Q&A更新";
-  base.strategy.routine = base.strategy.routine || "毎朝ニュース/週2ケース/週1振り返り";
+  base.strategy.vision =
+    base.strategy.vision ||
+    "社会にインパクトを与えるキャリアを築く。使命感・戦略性・チーム連携を重視。";
+  base.strategy.focus =
+    base.strategy.focus ||
+    base.strategy.policies ||
+    "① 情報収集 → ② 志望度上位に集中 → ③ 想定Q&A更新";
+  base.strategy.routine =
+    base.strategy.routine || "毎朝ニュース/週2ケース/週1振り返り";
 
   base.monthKey = base.monthKey || ymToday();
   base.monthlyPlans = base.monthlyPlans || { [ymToday()]: [] };
   base.monthlyGoals = base.monthlyGoals || { [ymToday()]: "" };
 
-  base.industries = Array.isArray(base.industries) ? base.industries : DEFAULT_INDUSTRIES;
-  base.companies = Array.isArray(base.companies) ? base.companies : [
-    { id: uid(), name: "キーエンス",   industry: "メーカー",   tags:["高収益","直販"], status:"調査中", memo:"FA×ソフト要研究", links:"https://www.keyence.co.jp/", rating:3 },
-    { id: uid(), name: "ソフトバンク", industry: "通信・IT",   tags:["AI","投資"],   status:"調査中", memo:"生成AI連携/DX",   links:"https://www.softbank.jp/", rating:4 },
-    { id: uid(), name: "内閣府",       industry: "官公庁・公社", tags:["政策"],       status:"未着手", memo:"官庁訪問ルート", links:"https://www.cao.go.jp/",   rating:5 },
-  ];
+  base.industries = Array.isArray(base.industries)
+    ? base.industries
+    : DEFAULT_INDUSTRIES;
 
-  base.quotes = Array.isArray(base.quotes) && base.quotes.length ? base.quotes : DEFAULT_QUOTES;
-  base.filters = base.filters || { status:"", keyword:"" };
+  base.companies = Array.isArray(base.companies)
+    ? base.companies
+    : [
+        {
+          id: uid(),
+          name: "キーエンス",
+          industry: "メーカー",
+          tags: ["高収益", "直販"],
+          status: "調査中",
+          memo: "FA×ソフト要研究",
+          links: "https://www.keyence.co.jp/",
+          rating: 3,
+        },
+        {
+          id: uid(),
+          name: "ソフトバンク",
+          industry: "通信・IT",
+          tags: ["AI", "投資"],
+          status: "調査中",
+          memo: "生成AI連携/DX",
+          links: "https://www.softbank.jp/",
+          rating: 4,
+        },
+        {
+          id: uid(),
+          name: "内閣府",
+          industry: "官公庁・公社",
+          tags: ["政策"],
+          status: "未着手",
+          memo: "官庁訪問ルート",
+          links: "https://www.cao.go.jp/",
+          rating: 5,
+        },
+      ];
+
+  base.quotes =
+    Array.isArray(base.quotes) && base.quotes.length
+      ? base.quotes
+      : DEFAULT_QUOTES;
+
+  base.filters = base.filters || { status: "", keyword: "" };
   return base;
 };
 
 // -------------------- ルートコンポーネント --------------------
-function App(){
+function App() {
+  // ❶ ローカルキャッシュ
   const [data, setData] = useState(() => {
-    try{
-      const raw = localStorage.getItem(LS_KEY);
-      return migrate(raw? JSON.parse(raw): null);
-    }catch{
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      return migrate(raw ? JSON.parse(raw) : null);
+    } catch {
       return migrate(null);
     }
   });
 
-  // tab: 'strategy'|'todo'|'companies'|'industry'|'all'
+  // ❷ Firebase Auth ユーザー
+  const [user, setUser] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  // UI 状態
   const [tab, setTab] = useState("strategy");
   const [selectedIndustry, setSelectedIndustry] = useState(null);
 
-  // モーダル&ドロワー
+  // モーダル
   const [showIndustryModal, setShowIndustryModal] = useState(false);
   const [industryNameInput, setIndustryNameInput] = useState("");
   const [showCompanyModal, setShowCompanyModal] = useState(false);
-  const [companyForm, setCompanyForm] = useState({ name:"", industry:"", tags:"", links:"" });
+  const [companyForm, setCompanyForm] = useState({
+    name: "",
+    industry: "",
+    tags: "",
+    links: "",
+  });
   const [companyMemoOpen, setCompanyMemoOpen] = useState(false);
   const [memoCompanyId, setMemoCompanyId] = useState("");
   const [showQuotesEditor, setShowQuotesEditor] = useState(false);
 
-  useEffect(()=> localStorage.setItem(LS_KEY, JSON.stringify(data)), [data]);
+  const {
+    strategy,
+    monthKey,
+    monthlyPlans,
+    monthlyGoals,
+    industries,
+    companies,
+    quotes,
+    filters,
+  } = data;
+  const update = (patch) => setData((d) => ({ ...d, ...patch }));
 
-  const { strategy, monthKey, monthlyPlans, monthlyGoals, industries, companies, quotes, filters } = data;
-  const update = (patch) => setData(d => ({ ...d, ...patch }));
+  // ---------- Firebase Auth 監視 ----------
+  useEffect(() => {
+    const unsub = firebase.auth().onAuthStateChanged(async (fbUser) => {
+      setUser(fbUser);
+      if (fbUser) {
+        const db = firebase.firestore();
+        const ref = db.collection("users").doc(fbUser.uid);
+        const snap = await ref.get();
+        if (snap.exists) {
+          const remote = snap.data();
+          setData(migrate(remote));
+        } else {
+          await ref.set(data);
+        }
+      }
+    });
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---------- ローカルストレージ保存 ----------
+  useEffect(() => {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.log("localStorage save failed", e);
+    }
+  }, [data]);
+
+  // ---------- Firestore 同期（user がいる時だけ） ----------
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    setSaving(true);
+    const id = setTimeout(async () => {
+      try {
+        await firebase.firestore().collection("users").doc(user.uid).set(data);
+      } catch (e) {
+        console.log("Firestore save failed", e);
+      } finally {
+        if (!cancelled) setSaving(false);
+      }
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [data, user]);
+
+  // ---------- ログイン ----------
+  const handleSignIn = async () => {
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      await firebase.auth().signInWithPopup(provider);
+    } catch (e) {
+      alert("ログインに失敗しました：" + e.message);
+    }
+  };
+  const handleSignOut = async () => {
+    try {
+      await firebase.auth().signOut();
+    } catch (e) {
+      alert("ログアウトに失敗しました：" + e.message);
+    }
+  };
 
   // ---- 戦略
-  const handleStrategyChange = (k,v) => update({ strategy: { ...strategy, [k]: v } });
+  const handleStrategyChange = (k, v) =>
+    update({ strategy: { ...strategy, [k]: v } });
 
-  // ---- ToDo
+  // ---- ToDo / 今月目標
   const ensureMonth = (ym) => {
-    if(!(monthlyPlans||{})[ym]) update({ monthlyPlans: { ...monthlyPlans, [ym]: [] } });
-    if(!(monthlyGoals||{})[ym]) update({ monthlyGoals: { ...monthlyGoals, [ym]: "" } });
+    if (!(monthlyPlans || {})[ym])
+      update({ monthlyPlans: { ...monthlyPlans, [ym]: [] } });
+    if (!(monthlyGoals || {})[ym])
+      update({ monthlyGoals: { ...monthlyGoals, [ym]: "" } });
   };
-  const setMonth = (ym)=>{ ensureMonth(ym); update({ monthKey: ym }); };
-  const setMonthlyGoal = (ym, v)=> update({ monthlyGoals: { ...monthlyGoals, [ym]: v } });
-  const addTask = ()=> {
-    const t = { id: uid(), title:"新しいToDo", priority:"Mid", done:false };
+  const setMonth = (ym) => {
+    ensureMonth(ym);
+    update({ monthKey: ym });
+  };
+  const setMonthlyGoal = (ym, v) =>
+    update({ monthlyGoals: { ...monthlyGoals, [ym]: v } });
+
+  const addTask = () => {
+    const t = { id: uid(), title: "新しいToDo", priority: "Mid", done: false };
     const list = monthlyPlans[monthKey] || [];
     update({ monthlyPlans: { ...monthlyPlans, [monthKey]: [t, ...list] } });
   };
-  const updateTask = (id,patch)=>{
-    const list=(monthlyPlans[monthKey]||[]).map(t=> t.id===id? {...t, ...patch}: t);
+  const updateTask = (id, patch) => {
+    const list = (monthlyPlans[monthKey] || []).map((t) =>
+      t.id === id ? { ...t, ...patch } : t
+    );
     update({ monthlyPlans: { ...monthlyPlans, [monthKey]: list } });
   };
-  const deleteTask = (id)=>{
-    const list=(monthlyPlans[monthKey]||[]).filter(t=> t.id!==id);
+  const deleteTask = (id) => {
+    const list = (monthlyPlans[monthKey] || []).filter((t) => t.id !== id);
     update({ monthlyPlans: { ...monthlyPlans, [monthKey]: list } });
   };
 
-  // ---- 志望業界（フィルタ & 集計）
-  const setFilter = (k,v)=> update({ filters: { ...filters, [k]: v } });
+  // ---- フィルタ & ソート
+  const setFilter = (k, v) => update({ filters: { ...filters, [k]: v } });
 
-  const filteredCompanies = useMemo(()=>{
-    return (companies||[]).filter(c=>{
-      if(filters.status && c.status!==filters.status) return false;
-      if(filters.keyword){
-        const kw=filters.keyword.toLowerCase();
-        const hay=[c.name,c.industry,c.memo,c.links,(c.tags||[]).join(" "),c.status].join(" ").toLowerCase();
-        if(!hay.includes(kw)) return false;
+  const filteredCompanies = useMemo(() => {
+    return (companies || []).filter((c) => {
+      if (filters.status && c.status !== filters.status) return false;
+      if (filters.keyword) {
+        const kw = filters.keyword.toLowerCase();
+        const hay = [
+          c.name,
+          c.industry,
+          c.memo,
+          c.links,
+          (c.tags || []).join(" "),
+          c.status,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(kw)) return false;
       }
       return true;
     });
   }, [companies, filters]);
 
-  const moveIndustry = (i, dir)=>{
-    const a=[...industries]; const j=i+dir; if(j<0||j>=a.length) return;
-    [a[i],a[j]]=[a[j],a[i]];
-    update({ industries: a });
-  };
-  const deleteIndustry = (i)=>{
-    if(!confirm("この業界を削除しますか？（企業データは保持）")) return;
-    const name = industries[i];
-    update({ industries: industries.filter(x=> x!==name) });
-  };
-
-  // 企業追加/更新/削除
-  const openCompanyModal = (ind)=>{
-    setCompanyForm({ name:"", industry: ind||industries[0]||"", tags:"", links:"" });
-    setShowCompanyModal(true);
-  };
-  const submitCompany = ()=>{
-    const nm=companyForm.name.trim(); if(!nm) return;
-    const tags=companyForm.tags.split(/[\s,]+/).filter(Boolean);
-    const c={
-      id:uid(),
-      name:nm,
-      industry:companyForm.industry,
-      tags,
-      status:"未着手",
-      memo:"",
-      links:companyForm.links.trim(),
-      rating:0
-    };
-    update({ companies: [c, ...(companies||[])] });
-    setShowCompanyModal(false);
-  };
-  const updateCompany = (id, patch)=> update({ companies: (companies||[]).map(c=> c.id===id? { ...c, ...patch }: c) });
-  const deleteCompany = (id)=>{
-    if(!confirm("この企業を削除しますか？")) return;
-    update({ companies: (companies||[]).filter(c=> c.id!==id) });
-  };
-  const setRating = (id, r)=> updateCompany(id, { rating:r });
-  const openCompanyMemo = (id)=>{ setMemoCompanyId(id); setCompanyMemoOpen(true); };
-
-  // 全業界横断ビュー
   const [allSort, setAllSort] = useState("rating_desc");
-  const allSorted = useMemo(()=>{
-    const list=[...(filteredCompanies||[])];
-    const byName=(x,y)=> x.name.localeCompare(y.name,'ja');
-    const byInd=(x,y)=> x.industry.localeCompare(y.industry,'ja') || byName(x,y);
-    const bySt=(x,y)=> x.status.localeCompare(y.status,'ja') || byName(x,y);
-    const byRate=(x,y)=> (y.rating||0)-(x.rating||0) || byName(x,y);
-    if(allSort==='name_asc') list.sort(byName);
-    else if(allSort==='industry_asc') list.sort(byInd);
-    else if(allSort==='status_asc') list.sort(bySt);
+  const allSorted = useMemo(() => {
+    const list = [...(filteredCompanies || [])];
+    const byName = (x, y) => x.name.localeCompare(y.name, "ja");
+    const byInd = (x, y) =>
+      x.industry.localeCompare(y.industry, "ja") || byName(x, y);
+    const bySt = (x, y) =>
+      x.status.localeCompare(y.status, "ja") || byName(x, y);
+    const byRate = (x, y) => (y.rating || 0) - (x.rating || 0) || byName(x, y);
+    if (allSort === "name_asc") list.sort(byName);
+    else if (allSort === "industry_asc") list.sort(byInd);
+    else if (allSort === "status_asc") list.sort(bySt);
     else list.sort(byRate);
     return list;
-  },[filteredCompanies, allSort]);
+  }, [filteredCompanies, allSort]);
 
+  const moveIndustry = (i, dir) => {
+    const a = [...industries];
+    const j = i + dir;
+    if (j < 0 || j >= a.length) return;
+    [a[i], a[j]] = [a[j], a[i]];
+    update({ industries: a });
+  };
+  const deleteIndustry = (i) => {
+    if (!confirm("この業界を削除しますか？（企業データは保持）")) return;
+    const name = industries[i];
+    update({ industries: industries.filter((x) => x !== name) });
+  };
+
+  // ---- 企業
+  const openCompanyModal = (ind) => {
+    setCompanyForm({
+      name: "",
+      industry: ind || industries[0] || "",
+      tags: "",
+      links: "",
+    });
+    setShowCompanyModal(true);
+  };
+  const submitCompany = () => {
+    const nm = companyForm.name.trim();
+    if (!nm) return;
+    const tags = companyForm.tags.split(/[\s,]+/).filter(Boolean);
+    const c = {
+      id: uid(),
+      name: nm,
+      industry: companyForm.industry,
+      tags,
+      status: "未着手",
+      memo: "",
+      links: companyForm.links.trim(),
+      rating: 0,
+    };
+    update({ companies: [c, ...(companies || [])] });
+    setShowCompanyModal(false);
+  };
+  const updateCompany = (id, patch) =>
+    update({
+      companies: (companies || []).map((c) =>
+        c.id === id ? { ...c, ...patch } : c
+      ),
+    });
+  const deleteCompany = (id) => {
+    if (!confirm("この企業を削除しますか？")) return;
+    update({ companies: (companies || []).filter((c) => c.id !== id) });
+  };
+  const setRating = (id, r) => updateCompany(id, { rating: r });
+  const openCompanyMemo = (id) => {
+    setMemoCompanyId(id);
+    setCompanyMemoOpen(true);
+  };
+
+  // -------------------- UI --------------------
   return (
     <div>
       {/* ヘッダー */}
@@ -180,29 +349,95 @@ function App(){
             <div className="w-2 h-6 rounded bg-gradient-to-b from-blue-400 to-indigo-500" />
             <h1 className="font-extrabold text-lg">就活ダッシュボード</h1>
           </div>
-          <nav className="flex gap-1">
-            <Tab label="戦略" active={tab==='strategy'} onClick={()=>{ setTab('strategy'); setSelectedIndustry(null); }} />
-            <Tab label="今月のToDo" active={tab==='todo'} onClick={()=>{ setTab('todo'); setSelectedIndustry(null); }} />
-            <Tab label="志望業界" active={tab==='companies'||tab==='industry'} onClick={()=>{ setTab('companies'); setSelectedIndustry(null); }} />
-            <Tab label="全業界横断" active={tab==='all'} onClick={()=>{ setTab('all'); setSelectedIndustry(null); }} />
-          </nav>
+          <div className="flex items-center gap-2 text-xs">
+            {user ? (
+              <>
+                <span className="hidden sm:inline text-slate-600">
+                  {user.photoURL && (
+                    <img
+                      src={user.photoURL}
+                      alt=""
+                      className="inline-block w-6 h-6 rounded-full mr-1 align-middle"
+                    />
+                  )}
+                  こんにちは、{user.displayName || user.email} さん
+                </span>
+                {saving && (
+                  <span className="text-[10px] text-blue-600">同期中…</span>
+                )}
+                <button
+                  onClick={handleSignOut}
+                  className="px-3 py-1.5 border rounded-lg bg-white hover:bg-blue-50"
+                >
+                  ログアウト
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleSignIn}
+                className="px-3 py-1.5 text-xs sm:text-sm bg-blue-600 text-white rounded-lg shadow-sm hover:opacity-90"
+              >
+                Googleでログイン
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* タブ */}
+        <div className="bg-white border-t border-blue-100">
+          <div className="max-w-5xl mx-auto px-2 py-1 flex gap-1">
+            <Tab
+              label="戦略"
+              active={tab === "strategy"}
+              onClick={() => {
+                setTab("strategy");
+                setSelectedIndustry(null);
+              }}
+            />
+            <Tab
+              label="今月のToDo"
+              active={tab === "todo"}
+              onClick={() => {
+                setTab("todo");
+                setSelectedIndustry(null);
+              }}
+            />
+            <Tab
+              label="志望業界"
+              active={tab === "companies" || tab === "industry"}
+              onClick={() => {
+                setTab("companies");
+                setSelectedIndustry(null);
+              }}
+            />
+            <Tab
+              label="全業界横断"
+              active={tab === "all"}
+              onClick={() => {
+                setTab("all");
+                setSelectedIndustry(null);
+              }}
+            />
+          </div>
         </div>
       </header>
 
       {/* 本体 */}
       <main className="max-w-5xl mx-auto p-4">
         {/* 戦略 */}
-        {tab==='strategy' && (
+        {tab === "strategy" && (
           <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-bold text-lg">戦略目標・方針</h2>
-              <span className="text-xs text-slate-500">自動保存</span>
+              <span className="text-xs text-slate-500">
+                自動保存（クラウド同期）
+              </span>
             </div>
             <div className="relative">
               <QuoteTicker quotes={quotes} />
               <div className="absolute right-2 top-2">
                 <button
-                  onClick={()=> setShowQuotesEditor(true)}
+                  onClick={() => setShowQuotesEditor(true)}
                   className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-blue-50"
                 >
                   格言編集
@@ -215,7 +450,9 @@ function App(){
                 <textarea
                   rows={8}
                   value={strategy.vision}
-                  onChange={(e)=> handleStrategyChange('vision', e.target.value)}
+                  onChange={(e) =>
+                    handleStrategyChange("vision", e.target.value)
+                  }
                   className="mt-1 w-full p-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
               </div>
@@ -224,7 +461,9 @@ function App(){
                 <textarea
                   rows={8}
                   value={strategy.focus}
-                  onChange={(e)=> handleStrategyChange('focus', e.target.value)}
+                  onChange={(e) =>
+                    handleStrategyChange("focus", e.target.value)
+                  }
                   className="mt-1 w-full p-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
               </div>
@@ -233,7 +472,9 @@ function App(){
                 <textarea
                   rows={8}
                   value={strategy.routine}
-                  onChange={(e)=> handleStrategyChange('routine', e.target.value)}
+                  onChange={(e) =>
+                    handleStrategyChange("routine", e.target.value)
+                  }
                   className="mt-1 w-full p-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300"
                 />
               </div>
@@ -242,7 +483,7 @@ function App(){
         )}
 
         {/* ToDo */}
-        {tab==='todo' && (
+        {tab === "todo" && (
           <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <h2 className="font-bold text-lg">今月の ToDo</h2>
@@ -259,52 +500,72 @@ function App(){
             <div>
               <label className="text-slate-500 text-sm">今月の目標</label>
               <input
-                value={(monthlyGoals||{})[monthKey]||""}
-                onChange={(e)=> setMonthlyGoal(monthKey, e.target.value)}
+                value={(monthlyGoals || {})[monthKey] || ""}
+                onChange={(e) => setMonthlyGoal(monthKey, e.target.value)}
                 placeholder="例：OB訪問4件、ケース演習10本、英語30分/日"
                 className="mt-1 w-full p-2 border rounded-xl"
               />
             </div>
             <div className="space-y-2">
-              {(monthlyPlans[monthKey]||[]).length===0 && (
-                <div className="text-sm text-slate-500">この月のToDoはまだありません。</div>
+              {(monthlyPlans[monthKey] || []).length === 0 && (
+                <div className="text-sm text-slate-500">
+                  この月のToDoはまだありません。
+                </div>
               )}
-              {(monthlyPlans[monthKey]||[]).map(t=> (
-                <div key={t.id} className="p-3 border rounded-xl flex flex-col md:flex-row md:items-center gap-3">
+              {(monthlyPlans[monthKey] || []).map((t) => (
+                <div
+                  key={t.id}
+                  className="p-3 border rounded-xl flex flex-col md:flex-row md:items-center gap-3"
+                >
                   <div className="flex items-center gap-2 flex-1">
                     <input
                       type="checkbox"
                       checked={t.done}
-                      onChange={(e)=> updateTask(t.id,{ done:e.target.checked })}
+                      onChange={(e) =>
+                        updateTask(t.id, { done: e.target.checked })
+                      }
                     />
                     <input
                       value={t.title}
-                      onChange={(e)=> updateTask(t.id,{ title:e.target.value })}
-                      className={cx("flex-1 p-2 rounded-lg border", t.done && "line-through text-slate-400")}
+                      onChange={(e) =>
+                        updateTask(t.id, { title: e.target.value })
+                      }
+                      className={cx(
+                        "flex-1 p-2 rounded-lg border",
+                        t.done && "line-through text-slate-400"
+                      )}
                     />
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <select
-                      value={t.priority||"Mid"}
-                      onChange={(e)=> updateTask(t.id,{ priority:e.target.value })}
+                      value={t.priority || "Mid"}
+                      onChange={(e) =>
+                        updateTask(t.id, { priority: e.target.value })
+                      }
                       className="p-2 border rounded-lg"
                     >
-                      {["Low","Mid","High"].map(p=> <option key={p}>{p}</option>)}
+                      {["Low", "Mid", "High"].map((p) => (
+                        <option key={p}>{p}</option>
+                      ))}
                     </select>
                     <input
                       type="date"
-                      value={t.due||""}
-                      onChange={(e)=> updateTask(t.id,{ due:e.target.value })}
+                      value={t.due || ""}
+                      onChange={(e) =>
+                        updateTask(t.id, { due: e.target.value })
+                      }
                       className="p-2 border rounded-lg"
                     />
                     <input
                       placeholder="メモ"
-                      value={t.note||""}
-                      onChange={(e)=> updateTask(t.id,{ note:e.target.value })}
+                      value={t.note || ""}
+                      onChange={(e) =>
+                        updateTask(t.id, { note: e.target.value })
+                      }
                       className="p-2 border rounded-lg w-40"
                     />
                     <button
-                      onClick={()=> deleteTask(t.id)}
+                      onClick={() => deleteTask(t.id)}
                       className="px-2 py-1 border rounded-lg"
                     >
                       削除
@@ -317,36 +578,43 @@ function App(){
         )}
 
         {/* 志望業界トップ */}
-        {tab==='companies' && (
+        {tab === "companies" && (
           <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <h2 className="font-bold text-lg">志望業界</h2>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={()=> setTab('all')}
+                  onClick={() => setTab("all")}
                   className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-sm"
                 >
                   全業界横断ビュー
                 </button>
                 <button
-                  onClick={()=>{ setIndustryNameInput(""); setShowIndustryModal(true); }}
+                  onClick={() => {
+                    setIndustryNameInput("");
+                    setShowIndustryModal(true);
+                  }}
                   className="px-3 py-1.5 border rounded-lg text-sm"
                 >
                   業界追加
                 </button>
                 <select
-                  value={filters?.status||""}
-                  onChange={(e)=> setFilter('status', e.target.value)}
+                  value={filters?.status || ""}
+                  onChange={(e) => setFilter("status", e.target.value)}
                   className="p-2 border rounded-lg text-sm"
                 >
                   <option value="">進捗（すべて）</option>
-                  {["未着手","調査中","エントリー","選考中","内定","辞退"].map(s=> (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
+                  {["未着手", "調査中", "エントリー", "選考中", "内定", "辞退"].map(
+                    (s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    )
+                  )}
                 </select>
                 <input
-                  value={filters?.keyword||""}
-                  onChange={(e)=> setFilter('keyword', e.target.value)}
+                  value={filters?.keyword || ""}
+                  onChange={(e) => setFilter("keyword", e.target.value)}
                   placeholder="キーワード"
                   className="p-2 border rounded-lg text-sm"
                 />
@@ -354,14 +622,22 @@ function App(){
             </div>
 
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {industries.map((ind, i)=> {
-                const count = filteredCompanies.filter(c=> c.industry===ind).length;
+              {industries.map((ind, i) => {
+                const count = filteredCompanies.filter(
+                  (c) => c.industry === ind
+                ).length;
                 return (
-                  <div key={ind} className="border rounded-2xl p-4 hover:shadow-md transition bg-white">
+                  <div
+                    key={ind}
+                    className="border rounded-2xl p-4 hover:shadow-md transition bg-white"
+                  >
                     <div className="flex items-center justify-between">
                       <button
                         className="text-left"
-                        onClick={()=>{ setSelectedIndustry(ind); setTab('industry'); }}
+                        onClick={() => {
+                          setSelectedIndustry(ind);
+                          setTab("industry");
+                        }}
                       >
                         <h3 className="font-semibold">{ind}</h3>
                         <div className="mt-1 text-xs text-slate-500">
@@ -371,21 +647,21 @@ function App(){
                       <div className="flex items-center gap-1">
                         <button
                           title="上へ"
-                          onClick={()=> moveIndustry(i,-1)}
+                          onClick={() => moveIndustry(i, -1)}
                           className="px-2 py-1 border rounded-lg"
                         >
                           ↑
                         </button>
                         <button
                           title="下へ"
-                          onClick={()=> moveIndustry(i, 1)}
+                          onClick={() => moveIndustry(i, 1)}
                           className="px-2 py-1 border rounded-lg"
                         >
                           ↓
                         </button>
                         <button
                           title="削除"
-                          onClick={()=> deleteIndustry(i)}
+                          onClick={() => deleteIndustry(i)}
                           className="px-2 py-1 border rounded-lg"
                         >
                           削除
@@ -399,20 +675,22 @@ function App(){
           </section>
         )}
 
-        {/* 業界別 企業一覧（別画面） */}
-        {tab==='industry' && (
+        {/* 業界別 企業一覧 */}
+        {tab === "industry" && (
           <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold text-lg">{selectedIndustry} の企業一覧</h2>
+              <h2 className="font-bold text-lg">
+                {selectedIndustry} の企業一覧
+              </h2>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={()=> setTab('companies')}
+                  onClick={() => setTab("companies")}
                   className="px-3 py-1.5 border rounded-lg text-sm"
                 >
                   ← 業界トップへ
                 </button>
                 <button
-                  onClick={()=> openCompanyModal(selectedIndustry||undefined)}
+                  onClick={() => openCompanyModal(selectedIndustry || undefined)}
                   className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-sm"
                 >
                   {selectedIndustry} に企業追加
@@ -420,16 +698,20 @@ function App(){
               </div>
             </div>
             <IndustryList
-              companies={(companies||[]).filter(c=> c.industry===selectedIndustry)}
+              companies={(companies || []).filter(
+                (c) => c.industry === selectedIndustry
+              )}
               onRate={setRating}
               onOpenMemo={openCompanyMemo}
               onDelete={deleteCompany}
             />
             {companyMemoOpen && (
               <CompanyMemoDrawer
-                company={(companies||[]).find(x=> x.id===memoCompanyId)}
-                onClose={()=> setCompanyMemoOpen(false)}
-                onChange={(patch)=> updateCompany(memoCompanyId, patch)}
+                company={(companies || []).find(
+                  (x) => x.id === memoCompanyId
+                )}
+                onClose={() => setCompanyMemoOpen(false)}
+                onChange={(patch) => updateCompany(memoCompanyId, patch)}
                 hideActionFields
               />
             )}
@@ -437,20 +719,20 @@ function App(){
         )}
 
         {/* 全業界横断ビュー */}
-        {tab==='all' && (
+        {tab === "all" && (
           <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <h2 className="font-bold text-lg">全業界横断ビュー</h2>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={()=> setTab('companies')}
+                  onClick={() => setTab("companies")}
                   className="px-3 py-1.5 border rounded-lg text-sm"
                 >
                   ← 業界トップへ
                 </button>
                 <select
                   value={allSort}
-                  onChange={(e)=> setAllSort(e.target.value)}
+                  onChange={(e) => setAllSort(e.target.value)}
                   className="p-2 border rounded-lg text-sm"
                 >
                   <option value="rating_desc">並び順：志望度(高→低)</option>
@@ -459,18 +741,22 @@ function App(){
                   <option value="status_asc">並び順：進捗(A→Z)</option>
                 </select>
                 <select
-                  value={filters?.status||""}
-                  onChange={(e)=> setFilter('status', e.target.value)}
+                  value={filters?.status || ""}
+                  onChange={(e) => setFilter("status", e.target.value)}
                   className="p-2 border rounded-lg text-sm"
                 >
                   <option value="">進捗（すべて）</option>
-                  {["未着手","調査中","エントリー","選考中","内定","辞退"].map(s=> (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
+                  {["未着手", "調査中", "エントリー", "選考中", "内定", "辞退"].map(
+                    (s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    )
+                  )}
                 </select>
                 <input
-                  value={filters?.keyword||""}
-                  onChange={(e)=> setFilter('keyword', e.target.value)}
+                  value={filters?.keyword || ""}
+                  onChange={(e) => setFilter("keyword", e.target.value)}
                   placeholder="キーワード"
                   className="p-2 border rounded-lg text-sm"
                 />
@@ -484,9 +770,11 @@ function App(){
             />
             {companyMemoOpen && (
               <CompanyMemoDrawer
-                company={(companies||[]).find(x=> x.id===memoCompanyId)}
-                onClose={()=> setCompanyMemoOpen(false)}
-                onChange={(patch)=> updateCompany(memoCompanyId, patch)}
+                company={(companies || []).find(
+                  (x) => x.id === memoCompanyId
+                )}
+                onClose={() => setCompanyMemoOpen(false)}
+                onChange={(patch) => updateCompany(memoCompanyId, patch)}
                 hideActionFields
               />
             )}
@@ -495,35 +783,35 @@ function App(){
       </main>
 
       <footer className="max-w-5xl mx-auto px-4 py-8 text-center text-xs text-slate-500">
-        すべてのデータはブラウザにローカル保存されます（{LS_KEY}）。
+        データはローカル & Firebase に保存されます。PCとスマホで同じGoogleアカウントでログインすれば同期されます。
       </footer>
 
-      {/* モーダル：業界追加 */}
+      {/* 業界追加モーダル */}
       {showIndustryModal && (
-        <Modal onClose={()=> setShowIndustryModal(false)} title="業界を追加">
+        <Modal onClose={() => setShowIndustryModal(false)} title="業界を追加">
           <div className="space-y-3">
             <input
               value={industryNameInput}
-              onChange={(e)=> setIndustryNameInput(e.target.value)}
+              onChange={(e) => setIndustryNameInput(e.target.value)}
               placeholder="例：プラットフォーマー"
               className="w-full p-2 border rounded-lg"
             />
             <div className="flex justify-end gap-2">
               <button
-                onClick={()=> setShowIndustryModal(false)}
+                onClick={() => setShowIndustryModal(false)}
                 className="px-3 py-1 border rounded-lg"
               >
                 キャンセル
               </button>
               <button
-                onClick={()=>{
+                onClick={() => {
                   const name = industryNameInput.trim();
-                  if(!name) return;
-                  if((industries||[]).includes(name)) {
+                  if (!name) return;
+                  if ((industries || []).includes(name)) {
                     alert("既に存在します");
                     return;
                   }
-                  update({ industries:[...industries, name] });
+                  update({ industries: [...industries, name] });
                   setShowIndustryModal(false);
                 }}
                 className="px-3 py-1 bg-blue-600 text-white rounded-lg"
@@ -535,16 +823,18 @@ function App(){
         </Modal>
       )}
 
-      {/* モーダル：企業追加 */}
+      {/* 企業追加モーダル */}
       {showCompanyModal && (
-        <Modal onClose={()=> setShowCompanyModal(false)} title="企業を追加">
+        <Modal onClose={() => setShowCompanyModal(false)} title="企業を追加">
           <div className="space-y-3 text-sm">
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-slate-500 text-xs">企業名</label>
                 <input
                   value={companyForm.name}
-                  onChange={(e)=> setCompanyForm({ ...companyForm, name:e.target.value })}
+                  onChange={(e) =>
+                    setCompanyForm({ ...companyForm, name: e.target.value })
+                  }
                   className="w-full p-2 border rounded-lg"
                 />
               </div>
@@ -552,18 +842,26 @@ function App(){
                 <label className="text-slate-500 text-xs">業界</label>
                 <select
                   value={companyForm.industry}
-                  onChange={(e)=> setCompanyForm({ ...companyForm, industry:e.target.value })}
+                  onChange={(e) =>
+                    setCompanyForm({ ...companyForm, industry: e.target.value })
+                  }
                   className="w-full p-2 border rounded-lg"
                 >
-                  {(industries||[]).map(x=> <option key={x}>{x}</option>)}
+                  {(industries || []).map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
                 </select>
               </div>
             </div>
             <div>
-              <label className="text-slate-500 text-xs">タグ（スペース/カンマ区切り）</label>
+              <label className="text-slate-500 text-xs">
+                タグ（スペース/カンマ区切り）
+              </label>
               <input
                 value={companyForm.tags}
-                onChange={(e)=> setCompanyForm({ ...companyForm, tags:e.target.value })}
+                onChange={(e) =>
+                  setCompanyForm({ ...companyForm, tags: e.target.value })
+                }
                 className="w-full p-2 border rounded-lg"
               />
             </div>
@@ -571,13 +869,15 @@ function App(){
               <label className="text-slate-500 text-xs">リンク（任意）</label>
               <input
                 value={companyForm.links}
-                onChange={(e)=> setCompanyForm({ ...companyForm, links:e.target.value })}
+                onChange={(e) =>
+                  setCompanyForm({ ...companyForm, links: e.target.value })
+                }
                 className="w-full p-2 border rounded-lg"
               />
             </div>
             <div className="flex justify-end gap-2">
               <button
-                onClick={()=> setShowCompanyModal(false)}
+                onClick={() => setShowCompanyModal(false)}
                 className="px-3 py-1 border rounded-lg"
               >
                 キャンセル
@@ -593,13 +893,13 @@ function App(){
         </Modal>
       )}
 
-      {/* モーダル：格言編集 */}
+      {/* 格言編集モーダル */}
       {showQuotesEditor && (
-        <Modal onClose={()=> setShowQuotesEditor(false)} title="格言を編集">
+        <Modal onClose={() => setShowQuotesEditor(false)} title="格言を編集">
           <QuotesEditor
             quotes={quotes}
-            onChange={(qs)=> update({ quotes: qs })}
-            onClose={()=> setShowQuotesEditor(false)}
+            onChange={(qs) => update({ quotes: qs })}
+            onClose={() => setShowQuotesEditor(false)}
           />
         </Modal>
       )}
@@ -607,15 +907,17 @@ function App(){
   );
 }
 
-// -------------------- UI コンポーネント --------------------
-function Tab({ label, active, onClick }){
+// -------------------- サブコンポーネント --------------------
+function Tab({ label, active, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cx(
         "px-4 py-2 rounded-t-xl border-b-2 focus:outline-none focus:ring-2 focus:ring-blue-300",
-        active? "border-blue-600 text-blue-700 font-semibold" : "border-transparent text-slate-600 hover:text-slate-800"
+        active
+          ? "border-blue-600 text-blue-700 font-semibold"
+          : "border-transparent text-slate-600 hover:text-slate-800"
       )}
     >
       {label}
@@ -623,43 +925,56 @@ function Tab({ label, active, onClick }){
   );
 }
 
-function MonthPicker({ value, onChange }){
-  const [y,m] = value.split('-').map(Number);
-  const dec = ()=>{ const d=new Date(y, m-2, 1); onChange(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
-  const inc = ()=>{ const d=new Date(y, m, 1);   onChange(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
+function MonthPicker({ value, onChange }) {
+  const [y, m] = value.split("-").map(Number);
+  const dec = () => {
+    const d = new Date(y, m - 2, 1);
+    onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+  const inc = () => {
+    const d = new Date(y, m, 1);
+    onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
   return (
     <div className="flex items-center gap-2">
-      <button type="button" onClick={dec} className="px-2 py-1 border rounded-lg">←</button>
+      <button type="button" onClick={dec} className="px-2 py-1 border rounded-lg">
+        ←
+      </button>
       <input
         type="month"
         value={value}
-        onChange={(e)=> onChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         className="p-2 border rounded-lg"
       />
-      <button type="button" onClick={inc} className="px-2 py-1 border rounded-lg">→</button>
+      <button type="button" onClick={inc} className="px-2 py-1 border rounded-lg">
+        →
+      </button>
     </div>
   );
 }
 
-function IndustryList({ companies, onRate, onOpenMemo, onDelete }){
+function IndustryList({ companies, onRate, onOpenMemo, onDelete }) {
   return (
     <ul className="space-y-2">
-      {companies.length===0 && (
+      {companies.length === 0 && (
         <div className="text-sm text-slate-500">該当企業はありません。</div>
       )}
-      {companies.map(c=> (
+      {companies.map((c) => (
         <li key={c.id} className="border rounded-xl p-3">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
               <div className="font-semibold flex items-center gap-2">
                 <span>{c.name}</span>
-                <StarRating value={c.rating||0} onChange={(r)=> onRate(c.id, r)} />
+                <StarRating
+                  value={c.rating || 0}
+                  onChange={(r) => onRate(c.id, r)}
+                />
               </div>
               <div className="mt-1 text-xs text-slate-500">
                 {c.industry} ・ 進捗: {c.status}
               </div>
               <div className="mt-2 flex flex-wrap gap-1">
-                {(c.tags||[]).map(t=> (
+                {(c.tags || []).map((t) => (
                   <span
                     key={t}
                     className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 border"
@@ -670,29 +985,32 @@ function IndustryList({ companies, onRate, onOpenMemo, onDelete }){
               </div>
               {c.links && (
                 <div className="mt-2 text-xs">
-                  {String(c.links).split(/\n|,\s*/).filter(Boolean).map((u,i)=> (
-                    <a
-                      key={i}
-                      href={u}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 underline mr-2"
-                    >
-                      公式
-                    </a>
-                  ))}
+                  {String(c.links)
+                    .split(/\n|,\s*/)
+                    .filter(Boolean)
+                    .map((u, i) => (
+                      <a
+                        key={i}
+                        href={u}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 underline mr-2"
+                      >
+                        公式
+                      </a>
+                    ))}
                 </div>
               )}
             </div>
             <div className="flex flex-col items-end gap-2 text-sm">
               <button
-                onClick={()=> onOpenMemo(c.id)}
+                onClick={() => onOpenMemo(c.id)}
                 className="px-2 py-1 border rounded-lg"
               >
                 メモ
               </button>
               <button
-                onClick={()=> onDelete(c.id)}
+                onClick={() => onDelete(c.id)}
                 className="px-2 py-1 border rounded-lg"
               >
                 削除
@@ -705,17 +1023,17 @@ function IndustryList({ companies, onRate, onOpenMemo, onDelete }){
   );
 }
 
-function StarRating({ value, onChange, max=5 }){
-  const stars = Array.from({ length:max }, (_,i)=> i+1);
+function StarRating({ value, onChange, max = 5 }) {
+  const stars = Array.from({ length: max }, (_, i) => i + 1);
   return (
     <div className="inline-flex select-none" role="radiogroup" aria-label="志望度">
-      {stars.map(n=> (
+      {stars.map((n) => (
         <button
           key={n}
           type="button"
           role="radio"
-          aria-checked={value===n}
-          onClick={()=> onChange(n)}
+          aria-checked={value === n}
+          onClick={() => onChange(n)}
           className="mx-[1px]"
           title={`志望度 ${n}/${max}`}
         >
@@ -724,11 +1042,11 @@ function StarRating({ value, onChange, max=5 }){
             viewBox="0 0 24 24"
             width="18"
             height="18"
-            fill={n<=value? "#fbbf24" : "none"}
+            fill={n <= value ? "#fbbf24" : "none"}
             stroke="#fbbf24"
             strokeWidth="2"
           >
-            <path d="M12 .587l3.668 7.431 8.2 1.192-5.934 5.786 1.401 8.168L12 18.896l-7.335 3.868 1.401-8.168L.132 9.21l8.2-1.192z"/>
+            <path d="M12 .587l3.668 7.431 8.2 1.192-5.934 5.786 1.401 8.168L12 18.896l-7.335 3.868 1.401-8.168L.132 9.21l8.2-1.192z" />
           </svg>
         </button>
       ))}
@@ -736,15 +1054,19 @@ function StarRating({ value, onChange, max=5 }){
   );
 }
 
-function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }){
+function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }) {
   const [tagInput, setTagInput] = useState("");
-  if(!company) return null;
-  const addTag = ()=>{
-    const t=tagInput.trim(); if(!t) return;
-    const tags=Array.from(new Set([...(company.tags||[]), t]));
-    onChange({ tags }); setTagInput("");
+  if (!company) return null;
+  const addTag = () => {
+    const t = tagInput.trim();
+    if (!t) return;
+    const tags = Array.from(new Set([...(company.tags || []), t]));
+    onChange({ tags });
+    setTagInput("");
   };
-  const removeTag = (t)=> onChange({ tags: (company.tags||[]).filter(x=> x!==t) });
+  const removeTag = (t) =>
+    onChange({ tags: (company.tags || []).filter((x) => x !== t) });
+
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
@@ -764,20 +1086,22 @@ function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }){
             <label className="text-slate-500 text-xs">進捗</label>
             <select
               value={company.status}
-              onChange={(e)=> onChange({ status:e.target.value })}
+              onChange={(e) => onChange({ status: e.target.value })}
               className="w-full p-2 border rounded-lg"
             >
-              {["未着手","調査中","エントリー","選考中","内定","辞退"].map(s=> (
-                <option key={s}>{s}</option>
-              ))}
+              {["未着手", "調査中", "エントリー", "選考中", "内定", "辞退"].map(
+                (s) => (
+                  <option key={s}>{s}</option>
+                )
+              )}
             </select>
           </div>
           {!hideActionFields && <div className="hidden" />}
           <div>
             <label className="text-slate-500 text-xs">リンク（1行1件）</label>
             <textarea
-              value={company.links||""}
-              onChange={(e)=> onChange({ links:e.target.value })}
+              value={company.links || ""}
+              onChange={(e) => onChange({ links: e.target.value })}
               rows={4}
               className="w-full p-2 border rounded-lg"
             />
@@ -785,8 +1109,8 @@ function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }){
           <div>
             <label className="text-slate-500 text-xs">詳細メモ</label>
             <textarea
-              value={company.memo||""}
-              onChange={(e)=> onChange({ memo:e.target.value })}
+              value={company.memo || ""}
+              onChange={(e) => onChange({ memo: e.target.value })}
               rows={10}
               className="w-full p-2 border rounded-xl"
             />
@@ -794,17 +1118,17 @@ function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }){
           <div>
             <label className="text-slate-500 text-xs">タグ</label>
             <div className="flex flex-wrap gap-1 mb-2">
-              {(company.tags||[]).map(t=> (
+              {(company.tags || []).map((t) => (
                 <button
                   type="button"
                   key={t}
-                  onClick={()=> removeTag(t)}
+                  onClick={() => removeTag(t)}
                   className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 border"
                 >
                   #{t}
                 </button>
               ))}
-              {(company.tags||[]).length===0 && (
+              {(company.tags || []).length === 0 && (
                 <span className="text-xs text-slate-400">
                   タグはここで追加できます
                 </span>
@@ -813,9 +1137,9 @@ function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }){
             <div className="flex items-center gap-2">
               <input
                 value={tagInput}
-                onChange={(e)=> setTagInput(e.target.value)}
+                onChange={(e) => setTagInput(e.target.value)}
                 placeholder="タグを入力しEnter"
-                onKeyDown={(e)=> e.key==='Enter' && addTag()}
+                onKeyDown={(e) => e.key === "Enter" && addTag()}
                 className="p-2 border rounded-lg flex-1"
               />
               <button
@@ -833,12 +1157,14 @@ function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }){
   );
 }
 
-function Modal({ title, onClose, children }){
-  useEffect(()=>{
-    const onKey=(e)=>{ if(e.key==='Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return ()=> window.removeEventListener('keydown', onKey);
-  },[onClose]);
+function Modal({ title, onClose, children }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
@@ -859,24 +1185,28 @@ function Modal({ title, onClose, children }){
   );
 }
 
-function QuoteTicker({ quotes, intervalMs=12000 }){
-  const [i,setI] = useState(0);
-  const [paused,setPaused] = useState(false);
+function QuoteTicker({ quotes, intervalMs = 12000 }) {
+  const [i, setI] = useState(0);
+  const [paused, setPaused] = useState(false);
 
-  useEffect(()=>{
-    if(paused || quotes.length===0) return;
-    const id=setInterval(()=> setI(x=> (x+1)%quotes.length), intervalMs);
-    return ()=> clearInterval(id);
-  },[quotes.length, intervalMs, paused]);
+  useEffect(() => {
+    if (paused || quotes.length === 0) return;
+    const id = setInterval(
+      () => setI((x) => (x + 1) % quotes.length),
+      intervalMs
+    );
+    return () => clearInterval(id);
+  }, [quotes.length, intervalMs, paused]);
 
-  const prev = ()=> setI(x=> (x-1+quotes.length)%quotes.length);
-  const next = ()=> setI(x=> (x+1)%quotes.length);
-  const q = quotes[i] || { text:"格言を追加してください", author:"" };
+  const prev = () => setI((x) => (x - 1 + quotes.length) % quotes.length);
+  const next = () => setI((x) => (x + 1) % quotes.length);
+  const q =
+    quotes[i] || { text: "格言を追加してください", author: "" };
 
   return (
     <div
-      onMouseEnter={()=> setPaused(true)}
-      onMouseLeave={()=> setPaused(false)}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
       className="relative overflow-hidden rounded-xl border bg-gradient-to-r from-indigo-50 to-blue-50"
     >
       <div className="p-4 pr-28">
@@ -908,16 +1238,28 @@ function QuoteTicker({ quotes, intervalMs=12000 }){
   );
 }
 
-function QuotesEditor({ quotes, onChange, onClose }){
-  const [local, setLocal] = useState(()=> quotes.map(q=> ({ ...q })));
-  const set = (i, patch)=> setLocal(arr=> arr.map((x,idx)=> idx===i? { ...x, ...patch }: x));
-  const add = ()=> setLocal(arr=> [...arr, { text:"", author:"" }]);
-  const del = (i)=> setLocal(arr=> arr.filter((_,idx)=> idx!==i));
-  const move = (i, dir)=> setLocal(arr=>{
-    const a=[...arr]; const j=i+dir; if(j<0||j>=a.length) return a;
-    [a[i],a[j]]=[a[j],a[i]]; return a;
-  });
-  const save = ()=>{ onChange(local); onClose(); };
+function QuotesEditor({ quotes, onChange, onClose }) {
+  const [local, setLocal] = useState(() => quotes.map((q) => ({ ...q })));
+  const set = (i, patch) =>
+    setLocal((arr) =>
+      arr.map((x, idx) => (idx === i ? { ...x, ...patch } : x))
+    );
+  const add = () =>
+    setLocal((arr) => [...arr, { text: "", author: "" }]);
+  const del = (i) =>
+    setLocal((arr) => arr.filter((_, idx) => idx !== i));
+  const move = (i, dir) =>
+    setLocal((arr) => {
+      const a = [...arr];
+      const j = i + dir;
+      if (j < 0 || j >= a.length) return a;
+      [a[i], a[j]] = [a[j], a[i]];
+      return a;
+    });
+  const save = () => {
+    onChange(local);
+    onClose();
+  };
 
   return (
     <div className="space-y-3">
@@ -925,25 +1267,40 @@ function QuotesEditor({ quotes, onChange, onClose }){
         自作格言の追加・削除・並べ替えができます。
       </div>
       <div className="max-h-[60vh] overflow-auto space-y-2">
-        {local.map((q,i)=> (
+        {local.map((q, i) => (
           <div key={i} className="flex items-center gap-2">
-            <span className="w-8 text-xs text-slate-500">{i+1}</span>
+            <span className="w-8 text-xs text-slate-500">{i + 1}</span>
             <input
               value={q.text}
-              onChange={(e)=> set(i,{ text:e.target.value })}
+              onChange={(e) => set(i, { text: e.target.value })}
               placeholder="格言本文"
               className="flex-1 p-2 border rounded-lg"
             />
             <input
-              value={q.author||""}
-              onChange={(e)=> set(i,{ author:e.target.value })}
+              value={q.author || ""}
+              onChange={(e) => set(i, { author: e.target.value })}
               placeholder="出典/作者"
               className="flex-1 p-2 border rounded-lg"
             />
             <div className="flex items-center gap-1">
-              <button onClick={()=> move(i,-1)} className="px-2 py-1 border rounded-lg">↑</button>
-              <button onClick={()=> move(i, 1)} className="px-2 py-1 border rounded-lg">↓</button>
-              <button onClick={()=> del(i)} className="px-2 py-1 border rounded-lg">削除</button>
+              <button
+                onClick={() => move(i, -1)}
+                className="px-2 py-1 border rounded-lg"
+              >
+                ↑
+              </button>
+              <button
+                onClick={() => move(i, 1)}
+                className="px-2 py-1 border rounded-lg"
+              >
+                ↓
+              </button>
+              <button
+                onClick={() => del(i)}
+                className="px-2 py-1 border rounded-lg"
+              >
+                削除
+              </button>
             </div>
           </div>
         ))}
