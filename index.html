@@ -5,22 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>就活ダッシュボード PWA</title>
 
-  <!-- PWA 関連 -->
+  <!-- PWA -->
   <meta name="theme-color" content="#0f172a" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
 
-  <!-- Tailwind CSS CDN -->
+  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     ::-webkit-scrollbar{height:8px;width:8px}
     ::-webkit-scrollbar-thumb{background:#c7d2fe;border-radius:8px}
   </style>
+
+  <!-- Firebase（compat版。グローバル変数 firebase として使う） -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    // ★ あなたの firebaseConfig をそのまま使用
+    const firebaseConfig = {
+      apiKey: "AIzaSyB3LBFTnC0Zsem9FDRguWlh7Kv0JUGRaO4",
+      authDomain: "career-index-8907e.firebaseapp.com",
+      projectId: "career-index-8907e",
+      storageBucket: "career-index-8907e.firebasestorage.app",
+      messagingSenderId: "504648932324",
+      appId: "1:504648932324:web:02e5d19b749c6c569e85f1",
+      measurementId: "G-LNNDGWYL65"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    // analytics は今回は使わないので省略
+  </script>
 </head>
 <body class="min-h-screen bg-[#f4f7ff] text-slate-900">
   <div id="root"></div>
 
-  <!-- React & ReactDOM & Babel (JSX用) -->
+  <!-- React / ReactDOM / Babel -->
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -30,10 +51,11 @@
 
   <!-- Service Worker 登録 -->
   <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js')
-          .catch(err => console.log('SW registration failed', err));
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker
+          .register("./service-worker.js")
+          .catch(err => console.log("SW registration failed", err));
       });
     }
   </script>
