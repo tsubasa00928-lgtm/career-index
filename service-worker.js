@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobhunt-dashboard-cache-v1";
+const CACHE_NAME = "jobhunt-dashboard-cache-v2"; // v1 → v2
 const URLS_TO_CACHE = [
   "./",
   "./index.html",
@@ -31,3 +31,4 @@ self.addEventListener("fetch", (event) => {
     caches.match(event.request).then((resp) => resp || fetch(event.request))
   );
 });
+
