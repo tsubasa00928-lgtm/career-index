@@ -2,12 +2,20 @@ const { useState, useEffect, useMemo } = React;
 
 // -------------------- 定数 & ユーティリティ --------------------
 const CACHE_KEY = "jobhunt-dashboard-cache-v4";
-const uid = () => Math.random().toString(36).slice(2, 10);
+const uid = () => Math.random().toString(36).slice(2, "0");
 const ymToday = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 const cx = (...xs) => xs.filter(Boolean).join(" ");
+
+const MAX_SHISAKU_FILE_SIZE = 500 * 1024; // 約500KB/ファイル
+
+const formatFileSize = (bytes) => {
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+  if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return bytes + " B";
+};
 
 const DEFAULT_QUOTES = [
   { text: "為せば成る。為さねば成らぬ。", author: "上杉鷹山" },
@@ -94,6 +102,11 @@ const migrate = (raw) => {
       : DEFAULT_QUOTES;
 
   base.filters = base.filters || { status: "", keyword: "" };
+
+  // 思索整序用の新フィールド（既存データは空で初期化されるだけ）
+  base.shisakuNote = typeof base.shisakuNote === "string" ? base.shisakuNote : "";
+  base.shisakuFiles = Array.isArray(base.shisakuFiles) ? base.shisakuFiles : [];
+
   return base;
 };
 
@@ -140,7 +153,10 @@ function App() {
     companies,
     quotes,
     filters,
+    shisakuNote,
+    shisakuFiles,
   } = data;
+
   const update = (patch) => setData((d) => ({ ...d, ...patch }));
 
   // ---------- Firebase Auth 監視 ----------
@@ -213,7 +229,7 @@ function App() {
   const handleStrategyChange = (k, v) =>
     update({ strategy: { ...strategy, [k]: v } });
 
-  // ---- ToDo / 今月目標
+  // ---- 今月 ToDo / 目標（データ構造はそのまま維持）
   const ensureMonth = (ym) => {
     if (!(monthlyPlans || {})[ym])
       update({ monthlyPlans: { ...monthlyPlans, [ym]: [] } });
@@ -339,6 +355,51 @@ function App() {
     setCompanyMemoOpen(true);
   };
 
+  // ---- 思索整序：ノート
+  const handleShisakuNoteChange = (v) => {
+    update({ shisakuNote: v });
+  };
+
+  // ---- 思索整序：ファイル追加・削除
+  const handleShisakuFilesAdd = (files) => {
+    if (!files || !files.length) return;
+    let tooLarge = false;
+
+    files.forEach((file) => {
+      if (file.size > MAX_SHISAKU_FILE_SIZE) {
+        tooLarge = true;
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const dataUrl = ev.target.result;
+        const obj = {
+          id: uid(),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          dataUrl,
+        };
+        setData((d) => ({
+          ...d,
+          shisakuFiles: [...(d.shisakuFiles || []), obj],
+        }));
+      };
+      reader.readAsDataURL(file);
+    });
+
+    if (tooLarge) {
+      alert("500KBを超えるファイルは保存できません。一部のファイルは追加されませんでした。");
+    }
+  };
+
+  const handleShisakuFileDelete = (id) => {
+    setData((d) => ({
+      ...d,
+      shisakuFiles: (d.shisakuFiles || []).filter((f) => f.id !== id),
+    }));
+  };
+
   // -------------------- UI --------------------
   return (
     <div>
@@ -395,7 +456,7 @@ function App() {
               }}
             />
             <Tab
-              label="今月のToDo"
+              label="思索整序"
               active={tab === "todo"}
               onClick={() => {
                 setTab("todo");
@@ -482,97 +543,184 @@ function App() {
           </section>
         )}
 
-        {/* ToDo */}
+        {/* 思索整序（旧：今月のToDo） */}
         {tab === "todo" && (
-          <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
+          <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <h2 className="font-bold text-lg">今月の ToDo</h2>
-              <div className="flex items-center gap-2">
-                <MonthPicker value={monthKey} onChange={setMonth} />
-                <button
-                  onClick={addTask}
-                  className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm shadow-sm hover:opacity-90"
-                >
-                  ToDo追加
-                </button>
-              </div>
+              <h2 className="font-bold text-lg">思索整序</h2>
+              <span className="text-xs text-slate-500">
+                ノートとファイルはローカル & Firebase に自動保存されます
+              </span>
             </div>
-            <div>
-              <label className="text-slate-500 text-sm">今月の目標</label>
-              <input
-                value={(monthlyGoals || {})[monthKey] || ""}
-                onChange={(e) => setMonthlyGoal(monthKey, e.target.value)}
-                placeholder="例：OB訪問4件、ケース演習10本、英語30分/日"
-                className="mt-1 w-full p-2 border rounded-xl"
+
+            {/* 思考ノート */}
+            <div className="rounded-2xl border border-blue-50 bg-slate-50/70 p-4 space-y-2">
+              <h3 className="font-semibold text-sm">思考ノート</h3>
+              <p className="text-xs text-slate-500">
+                キャリア・仕事・AI・人生についてのモヤモヤや仮説を、ざっと書き殴るためのノートです。
+              </p>
+              <textarea
+                rows={8}
+                value={shisakuNote}
+                onChange={(e) => handleShisakuNoteChange(e.target.value)}
+                className="w-full p-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+                placeholder="例：&#10;・AI時代の“ブランド”って本当に意味あるのか？&#10;・官僚と民間のハイブリッドキャリアのイメージ&#10;・30代までに身につけたいスキルセット など"
               />
             </div>
-            <div className="space-y-2">
-              {(monthlyPlans[monthKey] || []).length === 0 && (
-                <div className="text-sm text-slate-500">
-                  この月のToDoはまだありません。
-                </div>
-              )}
-              {(monthlyPlans[monthKey] || []).map((t) => (
-                <div
-                  key={t.id}
-                  className="p-3 border rounded-xl flex flex-col md:flex-row md:items-center gap-3"
-                >
-                  <div className="flex items-center gap-2 flex-1">
-                    <input
-                      type="checkbox"
-                      checked={t.done}
-                      onChange={(e) =>
-                        updateTask(t.id, { done: e.target.checked })
-                      }
-                    />
-                    <input
-                      value={t.title}
-                      onChange={(e) =>
-                        updateTask(t.id, { title: e.target.value })
-                      }
-                      className={cx(
-                        "flex-1 p-2 rounded-lg border",
-                        t.done && "line-through text-slate-400"
-                      )}
-                    />
+
+            {/* ファイルアップロード */}
+            <div className="rounded-2xl border border-blue-50 bg-slate-50/70 p-4 space-y-3">
+              <h3 className="font-semibold text-sm">関連ファイルの保管</h3>
+              <p className="text-xs text-slate-500">
+                思考の材料になるPDF・画像・テキストなどを置いておくスペースです。選択するとすぐ保存されます。<br />
+                1ファイルあたり約<strong>500KB</strong>まで推奨です（ブラウザの保存領域の制約）。
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) =>
+                    handleShisakuFilesAdd(
+                      Array.from(e.target.files || [])
+                    )
+                  }
+                  className="text-xs"
+                />
+              </div>
+
+              <div className="mt-2">
+                {(!shisakuFiles || shisakuFiles.length === 0) && (
+                  <div className="text-xs text-slate-500 border border-dashed rounded-xl px-3 py-2">
+                    まだ保存されているファイルはありません。
                   </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <select
-                      value={t.priority || "Mid"}
-                      onChange={(e) =>
-                        updateTask(t.id, { priority: e.target.value })
-                      }
-                      className="p-2 border rounded-lg"
-                    >
-                      {["Low", "Mid", "High"].map((p) => (
-                        <option key={p}>{p}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="date"
-                      value={t.due || ""}
-                      onChange={(e) =>
-                        updateTask(t.id, { due: e.target.value })
-                      }
-                      className="p-2 border rounded-lg"
-                    />
-                    <input
-                      placeholder="メモ"
-                      value={t.note || ""}
-                      onChange={(e) =>
-                        updateTask(t.id, { note: e.target.value })
-                      }
-                      className="p-2 border rounded-lg w-40"
-                    />
-                    <button
-                      onClick={() => deleteTask(t.id)}
-                      className="px-2 py-1 border rounded-lg"
-                    >
-                      削除
-                    </button>
-                  </div>
+                )}
+                {shisakuFiles && shisakuFiles.length > 0 && (
+                  <ul className="space-y-2">
+                    {shisakuFiles.map((f) => (
+                      <li
+                        key={f.id}
+                        className="flex flex-wrap items-center justify-between gap-2 border rounded-xl px-3 py-2 bg-white text-xs"
+                      >
+                        <div className="flex flex-col">
+                          <span className="font-semibold">{f.name}</span>
+                          <span className="text-[10px] text-slate-500">
+                            {formatFileSize(f.size)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={f.dataUrl}
+                            download={f.name}
+                            className="px-2 py-1 border rounded-lg bg-slate-50 hover:bg-slate-100"
+                          >
+                            DL
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleShisakuFileDelete(f.id)}
+                            className="px-2 py-1 border rounded-lg"
+                          >
+                            削除
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+
+            {/* 既存の「今月のToDo」ブロック（データ構造そのまま） */}
+            <div className="pt-2 border-t border-dashed border-slate-200 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <h3 className="font-semibold text-sm">今月の ToDo</h3>
+                <div className="flex items-center gap-2">
+                  <MonthPicker value={monthKey} onChange={setMonth} />
+                  <button
+                    onClick={addTask}
+                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm shadow-sm hover:opacity-90"
+                  >
+                    ToDo追加
+                  </button>
                 </div>
-              ))}
+              </div>
+              <div>
+                <label className="text-slate-500 text-xs">今月の目標</label>
+                <input
+                  value={(monthlyGoals || {})[monthKey] || ""}
+                  onChange={(e) => setMonthlyGoal(monthKey, e.target.value)}
+                  placeholder="例：OB訪問4件、ケース演習10本、英語30分/日"
+                  className="mt-1 w-full p-2 border rounded-xl text-sm"
+                />
+              </div>
+              <div className="space-y-2">
+                {(monthlyPlans[monthKey] || []).length === 0 && (
+                  <div className="text-sm text-slate-500">
+                    この月のToDoはまだありません。
+                  </div>
+                )}
+                {(monthlyPlans[monthKey] || []).map((t) => (
+                  <div
+                    key={t.id}
+                    className="p-3 border rounded-xl flex flex-col md:flex-row md:items-center gap-3"
+                  >
+                    <div className="flex items-center gap-2 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={t.done}
+                        onChange={(e) =>
+                          updateTask(t.id, { done: e.target.checked })
+                        }
+                      />
+                      <input
+                        value={t.title}
+                        onChange={(e) =>
+                          updateTask(t.id, { title: e.target.value })
+                        }
+                        className={cx(
+                          "flex-1 p-2 rounded-lg border text-sm",
+                          t.done && "line-through text-slate-400"
+                        )}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 text-xs md:text-sm">
+                      <select
+                        value={t.priority || "Mid"}
+                        onChange={(e) =>
+                          updateTask(t.id, { priority: e.target.value })
+                        }
+                        className="p-2 border rounded-lg"
+                      >
+                        {["Low", "Mid", "High"].map((p) => (
+                          <option key={p}>{p}</option>
+                        ))}
+                      </select>
+                      <input
+                        type="date"
+                        value={t.due || ""}
+                        onChange={(e) =>
+                          updateTask(t.id, { due: e.target.value })
+                        }
+                        className="p-2 border rounded-lg"
+                      />
+                      <input
+                        placeholder="メモ"
+                        value={t.note || ""}
+                        onChange={(e) =>
+                          updateTask(t.id, { note: e.target.value })
+                        }
+                        className="p-2 border rounded-lg w-40"
+                      />
+                      <button
+                        onClick={() => deleteTask(t.id)}
+                        className="px-2 py-1 border rounded-lg"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </section>
         )}
@@ -721,610 +869,5 @@ function App() {
         {/* 全業界横断ビュー */}
         {tab === "all" && (
           <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <h2 className="font-bold text-lg">全業界横断ビュー</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setTab("companies")}
-                  className="px-3 py-1.5 border rounded-lg text-sm"
-                >
-                  ← 業界トップへ
-                </button>
-                <select
-                  value={allSort}
-                  onChange={(e) => setAllSort(e.target.value)}
-                  className="p-2 border rounded-lg text-sm"
-                >
-                  <option value="rating_desc">並び順：志望度(高→低)</option>
-                  <option value="name_asc">並び順：社名(A→Z)</option>
-                  <option value="industry_asc">並び順：業界(A→Z)</option>
-                  <option value="status_asc">並び順：進捗(A→Z)</option>
-                </select>
-                <select
-                  value={filters?.status || ""}
-                  onChange={(e) => setFilter("status", e.target.value)}
-                  className="p-2 border rounded-lg text-sm"
-                >
-                  <option value="">進捗（すべて）</option>
-                  {["未着手", "調査中", "エントリー", "選考中", "内定", "辞退"].map(
-                    (s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    )
-                  )}
-                </select>
-                <input
-                  value={filters?.keyword || ""}
-                  onChange={(e) => setFilter("keyword", e.target.value)}
-                  placeholder="キーワード"
-                  className="p-2 border rounded-lg text-sm"
-                />
-              </div>
-            </div>
-            <IndustryList
-              companies={allSorted}
-              onRate={setRating}
-              onOpenMemo={openCompanyMemo}
-              onDelete={deleteCompany}
-            />
-            {companyMemoOpen && (
-              <CompanyMemoDrawer
-                company={(companies || []).find(
-                  (x) => x.id === memoCompanyId
-                )}
-                onClose={() => setCompanyMemoOpen(false)}
-                onChange={(patch) => updateCompany(memoCompanyId, patch)}
-                hideActionFields
-              />
-            )}
-          </section>
-        )}
-      </main>
+            <div className="flex 
 
-      <footer className="max-w-5xl mx-auto px-4 py-8 text-center text-xs text-slate-500">
-        データはローカル & Firebase に保存されます。PCとスマホで同じGoogleアカウントでログインすれば同期されます。
-      </footer>
-
-      {/* 業界追加モーダル */}
-      {showIndustryModal && (
-        <Modal onClose={() => setShowIndustryModal(false)} title="業界を追加">
-          <div className="space-y-3">
-            <input
-              value={industryNameInput}
-              onChange={(e) => setIndustryNameInput(e.target.value)}
-              placeholder="例：プラットフォーマー"
-              className="w-full p-2 border rounded-lg"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowIndustryModal(false)}
-                className="px-3 py-1 border rounded-lg"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={() => {
-                  const name = industryNameInput.trim();
-                  if (!name) return;
-                  if ((industries || []).includes(name)) {
-                    alert("既に存在します");
-                    return;
-                  }
-                  update({ industries: [...industries, name] });
-                  setShowIndustryModal(false);
-                }}
-                className="px-3 py-1 bg-blue-600 text-white rounded-lg"
-              >
-                追加
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* 企業追加モーダル */}
-      {showCompanyModal && (
-        <Modal onClose={() => setShowCompanyModal(false)} title="企業を追加">
-          <div className="space-y-3 text-sm">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-slate-500 text-xs">企業名</label>
-                <input
-                  value={companyForm.name}
-                  onChange={(e) =>
-                    setCompanyForm({ ...companyForm, name: e.target.value })
-                  }
-                  className="w-full p-2 border rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="text-slate-500 text-xs">業界</label>
-                <select
-                  value={companyForm.industry}
-                  onChange={(e) =>
-                    setCompanyForm({ ...companyForm, industry: e.target.value })
-                  }
-                  className="w-full p-2 border rounded-lg"
-                >
-                  {(industries || []).map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="text-slate-500 text-xs">
-                タグ（スペース/カンマ区切り）
-              </label>
-              <input
-                value={companyForm.tags}
-                onChange={(e) =>
-                  setCompanyForm({ ...companyForm, tags: e.target.value })
-                }
-                className="w-full p-2 border rounded-lg"
-              />
-            </div>
-            <div>
-              <label className="text-slate-500 text-xs">リンク（任意）</label>
-              <input
-                value={companyForm.links}
-                onChange={(e) =>
-                  setCompanyForm({ ...companyForm, links: e.target.value })
-                }
-                className="w-full p-2 border rounded-lg"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowCompanyModal(false)}
-                className="px-3 py-1 border rounded-lg"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={submitCompany}
-                className="px-3 py-1 bg-blue-600 text-white rounded-lg"
-              >
-                追加
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* 格言編集モーダル */}
-      {showQuotesEditor && (
-        <Modal onClose={() => setShowQuotesEditor(false)} title="格言を編集">
-          <QuotesEditor
-            quotes={quotes}
-            onChange={(qs) => update({ quotes: qs })}
-            onClose={() => setShowQuotesEditor(false)}
-          />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-// -------------------- サブコンポーネント --------------------
-function Tab({ label, active, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cx(
-        "px-4 py-2 rounded-t-xl border-b-2 focus:outline-none focus:ring-2 focus:ring-blue-300",
-        active
-          ? "border-blue-600 text-blue-700 font-semibold"
-          : "border-transparent text-slate-600 hover:text-slate-800"
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-function MonthPicker({ value, onChange }) {
-  const [y, m] = value.split("-").map(Number);
-  const dec = () => {
-    const d = new Date(y, m - 2, 1);
-    onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  };
-  const inc = () => {
-    const d = new Date(y, m, 1);
-    onChange(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  };
-  return (
-    <div className="flex items-center gap-2">
-      <button type="button" onClick={dec} className="px-2 py-1 border rounded-lg">
-        ←
-      </button>
-      <input
-        type="month"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="p-2 border rounded-lg"
-      />
-      <button type="button" onClick={inc} className="px-2 py-1 border rounded-lg">
-        →
-      </button>
-    </div>
-  );
-}
-
-function IndustryList({ companies, onRate, onOpenMemo, onDelete }) {
-  return (
-    <ul className="space-y-2">
-      {companies.length === 0 && (
-        <div className="text-sm text-slate-500">該当企業はありません。</div>
-      )}
-      {companies.map((c) => (
-        <li key={c.id} className="border rounded-xl p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1">
-              <div className="font-semibold flex items-center gap-2">
-                <span>{c.name}</span>
-                <StarRating
-                  value={c.rating || 0}
-                  onChange={(r) => onRate(c.id, r)}
-                />
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                {c.industry} ・ 進捗: {c.status}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {(c.tags || []).map((t) => (
-                  <span
-                    key={t}
-                    className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 border"
-                  >
-                    #{t}
-                  </span>
-                ))}
-              </div>
-              {c.links && (
-                <div className="mt-2 text-xs">
-                  {String(c.links)
-                    .split(/\n|,\s*/)
-                    .filter(Boolean)
-                    .map((u, i) => (
-                      <a
-                        key={i}
-                        href={u}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 underline mr-2"
-                      >
-                        公式
-                      </a>
-                    ))}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-col items-end gap-2 text-sm">
-              <button
-                onClick={() => onOpenMemo(c.id)}
-                className="px-2 py-1 border rounded-lg"
-              >
-                メモ
-              </button>
-              <button
-                onClick={() => onDelete(c.id)}
-                className="px-2 py-1 border rounded-lg"
-              >
-                削除
-              </button>
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function StarRating({ value, onChange, max = 5 }) {
-  const stars = Array.from({ length: max }, (_, i) => i + 1);
-  return (
-    <div className="inline-flex select-none" role="radiogroup" aria-label="志望度">
-      {stars.map((n) => (
-        <button
-          key={n}
-          type="button"
-          role="radio"
-          aria-checked={value === n}
-          onClick={() => onChange(n)}
-          className="mx-[1px]"
-          title={`志望度 ${n}/${max}`}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            width="18"
-            height="18"
-            fill={n <= value ? "#fbbf24" : "none"}
-            stroke="#fbbf24"
-            strokeWidth="2"
-          >
-            <path d="M12 .587l3.668 7.431 8.2 1.192-5.934 5.786 1.401 8.168L12 18.896l-7.335 3.868 1.401-8.168L.132 9.21l8.2-1.192z" />
-          </svg>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function CompanyMemoDrawer({ company, onClose, onChange, hideActionFields }) {
-  const [tagInput, setTagInput] = useState("");
-  if (!company) return null;
-  const addTag = () => {
-    const t = tagInput.trim();
-    if (!t) return;
-    const tags = Array.from(new Set([...(company.tags || []), t]));
-    onChange({ tags });
-    setTagInput("");
-  };
-  const removeTag = (t) =>
-    onChange({ tags: (company.tags || []).filter((x) => x !== t) });
-
-  return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-full sm:w-[520px] bg-white shadow-xl p-5 overflow-y-auto">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-lg">{company.name} のメモ</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1 border rounded-lg"
-          >
-            閉じる
-          </button>
-        </div>
-        <div className="space-y-3 text-sm">
-          <div>
-            <label className="text-slate-500 text-xs">進捗</label>
-            <select
-              value={company.status}
-              onChange={(e) => onChange({ status: e.target.value })}
-              className="w-full p-2 border rounded-lg"
-            >
-              {["未着手", "調査中", "エントリー", "選考中", "内定", "辞退"].map(
-                (s) => (
-                  <option key={s}>{s}</option>
-                )
-              )}
-            </select>
-          </div>
-          {!hideActionFields && <div className="hidden" />}
-          <div>
-            <label className="text-slate-500 text-xs">リンク（1行1件）</label>
-            <textarea
-              value={company.links || ""}
-              onChange={(e) => onChange({ links: e.target.value })}
-              rows={4}
-              className="w-full p-2 border rounded-lg"
-            />
-          </div>
-          <div>
-            <label className="text-slate-500 text-xs">詳細メモ</label>
-            <textarea
-              value={company.memo || ""}
-              onChange={(e) => onChange({ memo: e.target.value })}
-              rows={10}
-              className="w-full p-2 border rounded-xl"
-            />
-          </div>
-          <div>
-            <label className="text-slate-500 text-xs">タグ</label>
-            <div className="flex flex-wrap gap-1 mb-2">
-              {(company.tags || []).map((t) => (
-                <button
-                  type="button"
-                  key={t}
-                  onClick={() => removeTag(t)}
-                  className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 border"
-                >
-                  #{t}
-                </button>
-              ))}
-              {(company.tags || []).length === 0 && (
-                <span className="text-xs text-slate-400">
-                  タグはここで追加できます
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                placeholder="タグを入力しEnter"
-                onKeyDown={(e) => e.key === "Enter" && addTag()}
-                className="p-2 border rounded-lg flex-1"
-              />
-              <button
-                type="button"
-                onClick={addTag}
-                className="px-3 py-1 border rounded-lg"
-              >
-                追加
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Modal({ title, onClose, children }) {
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(560px,92vw)] bg-white rounded-2xl shadow-xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-lg">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1 border rounded-lg"
-          >
-            閉じる
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function QuoteTicker({ quotes, intervalMs = 12000 }) {
-  const [i, setI] = useState(0);
-  const [paused, setPaused] = useState(false);
-
-  useEffect(() => {
-    if (paused || quotes.length === 0) return;
-    const id = setInterval(
-      () => setI((x) => (x + 1) % quotes.length),
-      intervalMs
-    );
-    return () => clearInterval(id);
-  }, [quotes.length, intervalMs, paused]);
-
-  const prev = () => setI((x) => (x - 1 + quotes.length) % quotes.length);
-  const next = () => setI((x) => (x + 1) % quotes.length);
-  const q =
-    quotes[i] || { text: "格言を追加してください", author: "" };
-
-  return (
-    <div
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      className="relative overflow-hidden rounded-xl border bg-gradient-to-r from-indigo-50 to-blue-50"
-    >
-      <div className="p-4 pr-28">
-        <div className="text-sm text-slate-600">今日の格言</div>
-        <div className="mt-1 text-lg font-semibold">{q.text}</div>
-        {!!q.author && (
-          <div className="text-xs text-slate-500 mt-1">— {q.author}</div>
-        )}
-      </div>
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-        <button
-          type="button"
-          aria-label="Prev quote"
-          onClick={prev}
-          className="px-2 py-1 border rounded-lg bg-white"
-        >
-          ←
-        </button>
-        <button
-          type="button"
-          aria-label="Next quote"
-          onClick={next}
-          className="px-2 py-1 border rounded-lg bg-white"
-        >
-          →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function QuotesEditor({ quotes, onChange, onClose }) {
-  const [local, setLocal] = useState(() => quotes.map((q) => ({ ...q })));
-  const set = (i, patch) =>
-    setLocal((arr) =>
-      arr.map((x, idx) => (idx === i ? { ...x, ...patch } : x))
-    );
-  const add = () =>
-    setLocal((arr) => [...arr, { text: "", author: "" }]);
-  const del = (i) =>
-    setLocal((arr) => arr.filter((_, idx) => idx !== i));
-  const move = (i, dir) =>
-    setLocal((arr) => {
-      const a = [...arr];
-      const j = i + dir;
-      if (j < 0 || j >= a.length) return a;
-      [a[i], a[j]] = [a[j], a[i]];
-      return a;
-    });
-  const save = () => {
-    onChange(local);
-    onClose();
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="text-xs text-slate-500">
-        自作格言の追加・削除・並べ替えができます。
-      </div>
-      <div className="max-h-[60vh] overflow-auto space-y-2">
-        {local.map((q, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-8 text-xs text-slate-500">{i + 1}</span>
-            <input
-              value={q.text}
-              onChange={(e) => set(i, { text: e.target.value })}
-              placeholder="格言本文"
-              className="flex-1 p-2 border rounded-lg"
-            />
-            <input
-              value={q.author || ""}
-              onChange={(e) => set(i, { author: e.target.value })}
-              placeholder="出典/作者"
-              className="flex-1 p-2 border rounded-lg"
-            />
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => move(i, -1)}
-                className="px-2 py-1 border rounded-lg"
-              >
-                ↑
-              </button>
-              <button
-                onClick={() => move(i, 1)}
-                className="px-2 py-1 border rounded-lg"
-              >
-                ↓
-              </button>
-              <button
-                onClick={() => del(i)}
-                className="px-2 py-1 border rounded-lg"
-              >
-                削除
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center justify-between">
-        <button onClick={add} className="px-3 py-1.5 border rounded-lg">
-          行を追加
-        </button>
-        <div className="flex items-center gap-2">
-          <button onClick={onClose} className="px-3 py-1 border rounded-lg">
-            閉じる
-          </button>
-          <button
-            onClick={save}
-            className="px-3 py-1 bg-blue-600 text-white rounded-lg"
-          >
-            保存
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// -------------------- マウント --------------------
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
