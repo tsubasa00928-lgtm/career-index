@@ -866,7 +866,7 @@ function App() {
           </section>
         )}
 
-        {/* 全業界横断ビュー */}
+                {/* 全業界横断ビュー */}
         {tab === "all" && (
           <section className="bg-white rounded-2xl shadow-sm p-5 border border-blue-50 space-y-4">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -927,6 +927,8 @@ function App() {
               />
             )}
           </section>
+        )}
+
         )}
       </main>
 
@@ -1476,3 +1478,4 @@ function QuotesEditor({ quotes, onChange, onClose }) {
 // -------------------- マウント --------------------
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<App />);
+
